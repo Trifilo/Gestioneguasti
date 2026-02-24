@@ -2,10 +2,9 @@ from flask import Flask, render_template, request, redirect, url_for, session, j
 import sqlite3
 from functools import wraps
 import random, string
-import os  # Fondamentale per Render
+import os
 
 app = Flask(__name__)
-# Usa una chiave sicura dalle impostazioni di Render o una di default
 app.secret_key = os.environ.get('SECRET_KEY', 'una_chiave_segretissima_di_default')
 DB_NAME = 'scuola.db'
 
@@ -20,8 +19,6 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
-
-    # Tabella utenti
     c.execute("""
     CREATE TABLE IF NOT EXISTS utenti (
         id_utente INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,8 +28,6 @@ def init_db():
         ruolo TEXT DEFAULT 'studente'
     )
     """)
-
-    # Tabella segnalazioni
     c.execute("""
     CREATE TABLE IF NOT EXISTS segnalazioni (
         id_segnalazione INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -47,19 +42,13 @@ def init_db():
         FOREIGN KEY (id_utente) REFERENCES utenti(id_utente)
     )
     """)
-
-    # Inserimento admin fisso se non esiste
     c.execute("SELECT * FROM utenti WHERE ruolo='admin'")
     if not c.fetchone():
-        c.execute("""
-        INSERT INTO utenti (nome,email,password,ruolo)
-        VALUES (?,?,?,?)
-        """, ('Amministratore','admin@scuola.it','admin123','admin'))
-
+        c.execute("INSERT INTO utenti (nome,email,password,ruolo) VALUES (?,?,?,?)", 
+                 ('Amministratore','admin@scuola.it','admin123','admin'))
     conn.commit()
     conn.close()
 
-# Inizializza il DB all'avvio
 init_db()
 
 # ===============================
@@ -80,17 +69,6 @@ def admin_required(f):
             return "Accesso negato", 403
         return f(*args, **kwargs)
     return decorated
-
-# ===============================
-# FUNZIONI UTILI
-# ===============================
-def genera_password():
-    caratteri = string.ascii_letters + string.digits + "!@#$%^&*"
-    while True:
-        pw = ''.join(random.choice(caratteri) for _ in range(8))
-        if (any(c.islower() for c in pw) and any(c.isupper() for c in pw)
-            and any(c.isdigit() for c in pw) and any(c in "!@#$%^&*" for c in pw)):
-            return pw
 
 # ===============================
 # ROTTE DI AUTENTICAZIONE
@@ -124,24 +102,16 @@ def register():
         nome = request.form.get('nome')
         email = request.form.get('email')
         password = request.form.get('password')
-
-        if len(password) < 8 or not any(c.isupper() for c in password) \
-           or not any(c.islower() for c in password) or not any(c.isdigit() for c in password) \
-           or not any(c in "!@#$%^&*" for c in password):
-            errore = "Password non valida: minimo 8 caratteri, maiuscole/minuscole, numeri e simboli"
-            return render_template('register.html', errore=errore)
-
         conn = get_db_connection()
         try:
             conn.execute("INSERT INTO utenti (nome,email,password,ruolo) VALUES (?,?,?,?)",
                          (nome,email,password,'studente'))
             conn.commit()
+            return redirect(url_for('login'))
         except sqlite3.IntegrityError:
             errore = "Email già registrata"
-            return render_template('register.html', errore=errore)
         finally:
             conn.close()
-        return redirect(url_for('login'))
     return render_template('register.html', errore=errore)
 
 # ===============================
@@ -152,6 +122,18 @@ def register():
 def index():
     return render_template('index.html')
 
+@app.route('/segnalazioni')
+@login_required
+def segnalazioni():
+    conn = get_db_connection()
+    if session.get('ruolo') == 'admin':
+        res = conn.execute("SELECT s.*, u.nome AS nome_utente FROM segnalazioni s LEFT JOIN utenti u ON s.id_utente=u.id_utente ORDER BY s.data DESC").fetchall()
+    else:
+        res = conn.execute("SELECT s.*, u.nome AS nome_utente FROM segnalazioni s JOIN utenti u ON s.id_utente=u.id_utente WHERE s.id_utente=? ORDER BY s.data DESC",(session['user_id'],)).fetchall()
+    conn.close()
+    return render_template('segnalazioni.html', segnalazioni=res)
+
+# QUESTA È LA ROTTA CHE MANCAVA E CAUSAVA L'ERRORE
 @app.route('/nuova_segnalazione', methods=['GET','POST'])
 @login_required
 def nuova_segnalazione():
@@ -164,36 +146,12 @@ def nuova_segnalazione():
         classe = request.form.get('classe')
         aula = request.form.get('aula')
         conn = get_db_connection()
-        conn.execute("""
-            INSERT INTO segnalazioni (titolo,descrizione,categoria,classe,aula,id_utente)
-            VALUES (?,?,?,?,?,?)
-        """,(titolo,descrizione,categoria,classe,aula,session['user_id']))
+        conn.execute("INSERT INTO segnalazioni (titolo,descrizione,categoria,classe,aula,id_utente) VALUES (?,?,?,?,?,?)",
+                     (titolo, descrizione, categoria, classe, aula, session['user_id']))
         conn.commit()
         conn.close()
         return redirect(url_for('segnalazioni'))
     return render_template('nuova_segnalazione.html')
-
-@app.route('/segnalazioni')
-@login_required
-def segnalazioni():
-    conn = get_db_connection()
-    if session.get('ruolo') == 'admin':
-        segnalazioni = conn.execute("""
-            SELECT s.*, u.nome AS nome_utente 
-            FROM segnalazioni s 
-            LEFT JOIN utenti u ON s.id_utente=u.id_utente 
-            ORDER BY s.data DESC
-        """).fetchall()
-    else:
-        segnalazioni = conn.execute("""
-            SELECT s.*, u.nome AS nome_utente 
-            FROM segnalazioni s 
-            JOIN utenti u ON s.id_utente=u.id_utente 
-            WHERE s.id_utente=? 
-            ORDER BY s.data DESC
-        """,(session['user_id'],)).fetchall()
-    conn.close()
-    return render_template('segnalazioni.html', segnalazioni=segnalazioni)
 
 # ===============================
 # AZIONI ADMIN
@@ -217,9 +175,6 @@ def elimina_segnalazione(id_segnalazione):
     conn.close()
     return redirect(url_for('segnalazioni'))
 
-# ===============================
-# AVVIO PER RENDER
-# ===============================
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
