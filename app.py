@@ -5,11 +5,12 @@ import random, string
 import os
 
 app = Flask(__name__)
-app.secret_key = os.environ.get('SECRET_KEY', 'una_chiave_segretissima_di_default')
+# Chiave segreta per gestire le sessioni (login)
+app.secret_key = os.environ.get('SECRET_KEY', 'chiave_segreta_per_render_123')
 DB_NAME = 'scuola.db'
 
 # ===============================
-# DATABASE
+# GESTIONE DATABASE
 # ===============================
 def get_db_connection():
     conn = sqlite3.connect(DB_NAME)
@@ -19,6 +20,7 @@ def get_db_connection():
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
+    # Tabella Utenti
     c.execute("""
     CREATE TABLE IF NOT EXISTS utenti (
         id_utente INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,6 +30,7 @@ def init_db():
         ruolo TEXT DEFAULT 'studente'
     )
     """)
+    # Tabella Segnalazioni
     c.execute("""
     CREATE TABLE IF NOT EXISTS segnalazioni (
         id_segnalazione INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,6 +45,7 @@ def init_db():
         FOREIGN KEY (id_utente) REFERENCES utenti(id_utente)
     )
     """)
+    # Creazione Admin di default
     c.execute("SELECT * FROM utenti WHERE ruolo='admin'")
     if not c.fetchone():
         c.execute("INSERT INTO utenti (nome,email,password,ruolo) VALUES (?,?,?,?)", 
@@ -49,10 +53,11 @@ def init_db():
     conn.commit()
     conn.close()
 
+# Inizializza il database all'avvio
 init_db()
 
 # ===============================
-# DECORATORI
+# PROTEZIONE PAGINE (DECORATORI)
 # ===============================
 def login_required(f):
     @wraps(f)
@@ -66,7 +71,7 @@ def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if session.get('ruolo') != 'admin':
-            return "Accesso negato", 403
+            return "Accesso negato: area riservata agli amministratori", 403
         return f(*args, **kwargs)
     return decorated
 
@@ -87,7 +92,7 @@ def login():
             session['ruolo'] = user['ruolo']
             session['nome'] = user['nome']
             return redirect(url_for('index'))
-        errore = "Credenziali errate"
+        errore = "Email o password errati."
     return render_template('login.html', errore=errore)
 
 @app.route('/logout')
@@ -109,7 +114,7 @@ def register():
             conn.commit()
             return redirect(url_for('login'))
         except sqlite3.IntegrityError:
-            errore = "Email già registrata"
+            errore = "Questa email è già registrata."
         finally:
             conn.close()
     return render_template('register.html', errore=errore)
@@ -127,41 +132,58 @@ def index():
 def segnalazioni():
     conn = get_db_connection()
     if session.get('ruolo') == 'admin':
-        res = conn.execute("SELECT s.*, u.nome AS nome_utente FROM segnalazioni s LEFT JOIN utenti u ON s.id_utente=u.id_utente ORDER BY s.data DESC").fetchall()
+        # L'admin vede tutto
+        res = conn.execute("""
+            SELECT s.*, u.nome AS nome_utente 
+            FROM segnalazioni s 
+            LEFT JOIN utenti u ON s.id_utente=u.id_utente 
+            ORDER BY s.data DESC
+        """).fetchall()
     else:
-        res = conn.execute("SELECT s.*, u.nome AS nome_utente FROM segnalazioni s JOIN utenti u ON s.id_utente=u.id_utente WHERE s.id_utente=? ORDER BY s.data DESC",(session['user_id'],)).fetchall()
+        # Lo studente vede solo le sue
+        res = conn.execute("""
+            SELECT s.*, u.nome AS nome_utente 
+            FROM segnalazioni s 
+            JOIN utenti u ON s.id_utente=u.id_utente 
+            WHERE s.id_utente=? 
+            ORDER BY s.data DESC
+        """,(session['user_id'],)).fetchall()
     conn.close()
     return render_template('segnalazioni.html', segnalazioni=res)
 
-# QUESTA È LA ROTTA CHE MANCAVA E CAUSAVA L'ERRORE
 @app.route('/nuova_segnalazione', methods=['GET','POST'])
 @login_required
 def nuova_segnalazione():
     if session.get('ruolo') == 'admin':
-        return "Gli admin non possono inserire segnalazioni", 403
+        return "Gli amministratori non possono inviare segnalazioni", 403
+    
     if request.method == 'POST':
         titolo = request.form.get('titolo')
         descrizione = request.form.get('descrizione')
         categoria = request.form.get('categoria')
         classe = request.form.get('classe')
         aula = request.form.get('aula')
+        
         conn = get_db_connection()
-        conn.execute("INSERT INTO segnalazioni (titolo,descrizione,categoria,classe,aula,id_utente) VALUES (?,?,?,?,?,?)",
-                     (titolo, descrizione, categoria, classe, aula, session['user_id']))
+        conn.execute("""
+            INSERT INTO segnalazioni (titolo,descrizione,categoria,classe,aula,id_utente) 
+            VALUES (?,?,?,?,?,?)
+        """, (titolo, descrizione, categoria, classe, aula, session['user_id']))
         conn.commit()
         conn.close()
         return redirect(url_for('segnalazioni'))
+    
     return render_template('nuova_segnalazione.html')
 
 # ===============================
-# AZIONI ADMIN
+# FUNZIONI PER ADMIN
 # ===============================
 @app.route('/aggiorna_stato/<int:id_segnalazione>', methods=['POST'])
 @admin_required
 def aggiorna_stato(id_segnalazione):
-    stato = request.form.get('stato')
+    nuovo_stato = request.form.get('stato')
     conn = get_db_connection()
-    conn.execute("UPDATE segnalazioni SET stato=? WHERE id_segnalazione=?",(stato,id_segnalazione))
+    conn.execute("UPDATE segnalazioni SET stato=? WHERE id_segnalazione=?", (nuovo_stato, id_segnalazione))
     conn.commit()
     conn.close()
     return redirect(url_for('segnalazioni'))
@@ -170,11 +192,15 @@ def aggiorna_stato(id_segnalazione):
 @admin_required
 def elimina_segnalazione(id_segnalazione):
     conn = get_db_connection()
-    conn.execute("DELETE FROM segnalazioni WHERE id_segnalazione=?",(id_segnalazione,))
+    conn.execute("DELETE FROM segnalazioni WHERE id_segnalazione=?", (id_segnalazione,))
     conn.commit()
     conn.close()
     return redirect(url_for('segnalazioni'))
 
+# ===============================
+# AVVIO APPLICAZIONE
+# ===============================
 if __name__ == '__main__':
+    # Porta dinamica per Render
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
