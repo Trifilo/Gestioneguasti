@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="auth-box">
+    <h2>Login</h2>
+    {% if errore %}
+        <p style="color:red">{{ errore }}</p>
+    {% endif %}
+    <form method="POST">
+        <input type="text" name="email" placeholder="Email" required>
+        <input type="password" name="password" placeholder="Password" required>
+        <button class="btn" type="submit">Accedi</button>
+    </form>
+    <p><a href="{{ url_for('register') }}">Registrati</a> | <a href="{{ url_for('recupera') }}">Recupera Password</a></p>
+</div>
+{% endblock %}

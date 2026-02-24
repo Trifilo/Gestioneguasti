@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>Segnalazioni</h2>
+<table id="tabella-segnalazioni">
+    <thead>
+        <tr>
+            <th>Data</th>
+            <th>Titolo</th>
+            <th>Categoria</th>
+            <th>Classe/Aula</th>
+            <th>Stato</th>
+            <th>Utente</th>
+            {% if session.get('ruolo') == 'admin' %}
+                <th>Azioni</th>
+            {% endif %}
+        </tr>
+    </thead>
+    <tbody></tbody>
+</table>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function caricaSegnalazioni() {
+    $.getJSON("{{ url_for('polling') }}", function(data){
+        let tbody = $("#tabella-segnalazioni tbody");
+        tbody.empty();
+        data.forEach(function(seg){
+            let row = `<tr>
+                <td>${seg.data}</td>
+                <td>${seg.titolo}<br><small>${seg.descrizione}</small></td>
+                <td>${seg.categoria}</td>
+                <td>${seg.classe || ''} / ${seg.aula || ''}</td>
+                <td><span class="status-dot status-${seg.stato}"></span>${seg.stato}</td>
+                <td>${seg.nome_utente}</td>`;
+            if ("{{ session.get('ruolo') }}" === "admin") {
+                row += `<td>
+                    <form action="/aggiorna_stato/${seg.id_segnalazione}" method="POST">
+                        <select name="stato" onchange="this.form.submit()">
+                            <option value="rosso" ${seg.stato=='rosso'?'selected':''}>Rosso</option>
+                            <option value="giallo" ${seg.stato=='giallo'?'selected':''}>Giallo</option>
+                            <option value="verde" ${seg.stato=='verde'?'selected':''}>Verde</option>
+                        </select>
+                    </form>
+                    <form action="/elimina_segnalazione/${seg.id_segnalazione}" method="POST" onsubmit="return confirm('Confermi eliminazione?')">
+                        <button class="btn danger" type="submit">Elimina</button>
+                    </form>
+                </td>`;
+            }
+            row += `</tr>`;
+            tbody.append(row);
+        });
+    });
+}
+
+$(document).ready(function(){
+    caricaSegnalazioni();
+    setInterval(caricaSegnalazioni, 5000);
+});
+</script>
+{% endblock %}

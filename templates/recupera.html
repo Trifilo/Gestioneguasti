@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="auth-box">
+    <h2>Recupera Password</h2>
+    <form method="POST">
+        <input type="email" name="email" placeholder="Email" required>
+        <button class="btn" type="submit">Recupera</button>
+    </form>
+    {% if msg %}
+        <p style="color:green">{{ msg }}</p>
+    {% endif %}
+</div>
+{% endblock %}

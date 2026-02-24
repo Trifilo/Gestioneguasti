@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+
+{% block title %}Home - Gestione Segnalazioni{% endblock %}
+
+{% block content %}
+<div class="form-container">
+    <h2>Benvenuto {{ session.get('nome') }}</h2>
+    <p>
+        {% if session.get('ruolo') == 'admin' %}
+            Sei loggato come <strong>Amministratore</strong>. Puoi gestire tutte le segnalazioni.
+        {% else %}
+            Utilizza questo portale per inserire segnalazioni sui guasti nelle aule o nei laboratori.
+        {% endif %}
+    </p>
+
+    <div class="actions">
+        {% if session.get('ruolo') != 'admin' %}
+            <a href="{{ url_for('nuova_segnalazione') }}" class="btn">Inserisci Segnalazione</a>
+        {% endif %}
+        <a href="{{ url_for('segnalazioni') }}" class="btn secondary">Visualizza Segnalazioni</a>
+    </div>
+</div>
+
+<style>
+.form-container {
+    background: white;
+    padding: 25px;
+    max-width: 600px;
+    margin: 50px auto;
+    border-radius: 10px;
+    text-align: center;
+}
+.actions {
+    margin-top: 20px;
+}
+.actions a {
+    margin: 5px;
+    display: inline-block;
+}
+</style>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="form-container">
+    <h2>Nuova Segnalazione</h2>
+    <form method="POST">
+        <input type="text" name="titolo" placeholder="Titolo" required>
+        <textarea name="descrizione" placeholder="Descrizione" rows="5" required></textarea>
+        <input type="text" name="classe" placeholder="Classe">
+        <input type="text" name="aula" placeholder="Aula">
+        <select name="categoria">
+            <option value="elettronica">Elettronica/Informatica</option>
+            <option value="arredo">Arredo</option>
+            <option value="struttura">Struttura</option>
+            <option value="altro">Altro</option>
+        </select>
+        <button class="btn" type="submit">Invia</button>
+    </form>
+</div>
+{% endblock %}

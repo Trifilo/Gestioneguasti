@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Gestione Segnalazioni{% endblock %}</title>
+    <style>
+        body { margin:0; font-family: Arial,sans-serif; background:#f4f6f8; }
+        header { background:#1e293b; color:white; padding:15px; }
+        nav a { color:white; margin-right:15px; text-decoration:none; }
+        main { padding:20px; }
+        footer { text-align:center; background:#e5e7eb; padding:10px; }
+        .btn { background:#2563eb; color:white; padding:10px 15px; border-radius:6px; border:none; text-decoration:none; cursor:pointer; }
+        .btn.secondary { background:#64748b; }
+        .btn.danger { background:#dc2626; }
+        .form-container, .auth-box { background:white; padding:25px; max-width:500px; margin:30px auto; border-radius:10px; }
+        input, textarea, select { width:100%; padding:10px; margin:8px 0; }
+        table { width:100%; background:white; border-collapse:collapse; }
+        th, td { padding:10px; border-bottom:1px solid #ddd; }
+        .status-dot { display:inline-block; width:15px; height:15px; border-radius:50%; margin-right:5px; }
+        .status-rosso { background:red; }
+        .status-giallo { background:yellow; }
+        .status-verde { background:green; }
+        .auth { display:flex; justify-content:center; align-items:center; height:100vh; }
+    </style>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+<header>
+    <h1>Istituto Tecnico - Gestione Guasti</h1>
+    <nav>
+        <a href="{{ url_for('index') }}">Home</a>
+        {% if session.get('ruolo') != 'admin' %}
+            <a href="{{ url_for('nuova_segnalazione') }}">Nuova Segnalazione</a>
+        {% endif %}
+        <a href="{{ url_for('segnalazioni') }}">Segnalazioni</a>
+        {% if session.get('user_id') %}
+            <a href="{{ url_for('logout') }}">Logout</a>
+        {% else %}
+            <a href="{{ url_for('login') }}">Login</a>
+            <a href="{{ url_for('register') }}">Registrati</a>
+        {% endif %}
+    </nav>
+</header>
+
+<main>
+    {% block content %}{% endblock %}
+</main>
+
+<footer>
+    <p>&copy; 2026 Progetto Scolastico Carmelo Trifilo' - Classe 5C TL</p>
+</footer>
+
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>
