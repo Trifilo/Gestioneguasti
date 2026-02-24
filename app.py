@@ -41,6 +41,7 @@ def init_db():
         FOREIGN KEY (id_utente) REFERENCES utenti(id_utente)
     )
     """)
+    # Verifica admin di default
     c.execute("SELECT * FROM utenti WHERE ruolo='admin'")
     if not c.fetchone():
         c.execute("INSERT INTO utenti (nome,email,password,ruolo) VALUES (?,?,?,?)", 
@@ -64,6 +65,7 @@ def login_required(f):
 def admin_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
+        # Controllo ruolo ignorando maiuscole/minuscole
         ruolo = str(session.get('ruolo', '')).lower()
         if ruolo != 'admin':
             return "Accesso negato: area riservata agli amministratori", 403
@@ -113,7 +115,93 @@ def register():
     return render_template('register.html')
 
 # ===============================
-# RECUPERO PASSWORD (INLINE)
+# SEGNALAZIONI (LATO UTENTE E ADMIN)
+# ===============================
+@app.route('/')
+@login_required
+def index():
+    return render_template('index.html')
+
+@app.route('/segnalazioni')
+@login_required
+def segnalazioni():
+    conn = get_db_connection()
+    ruolo_corrente = str(session.get('ruolo', '')).lower()
+    
+    if ruolo_corrente == 'admin':
+        # ADMIN: vede tutto con i nomi degli utenti
+        res = conn.execute("""
+            SELECT s.*, u.nome AS nome_utente 
+            FROM segnalazioni s 
+            LEFT JOIN utenti u ON s.id_utente = u.id_utente 
+            ORDER BY s.data DESC
+        """).fetchall()
+    else:
+        # UTENTE: vede solo le proprie
+        res = conn.execute("""
+            SELECT s.*, u.nome AS nome_utente 
+            FROM segnalazioni s 
+            JOIN utenti u ON s.id_utente = u.id_utente 
+            WHERE s.id_utente = ? 
+            ORDER BY s.data DESC
+        """, (session['user_id'],)).fetchall()
+    conn.close()
+    return render_template('segnalazioni.html', segnalazioni=res)
+
+@app.route('/nuova_segnalazione', methods=['GET','POST'])
+@login_required
+def nuova_segnalazione():
+    if str(session.get('ruolo', '')).lower() == 'admin':
+        return "Gli amministratori non possono inserire segnalazioni.", 403
+        
+    if request.method == 'POST':
+        # Recupero dati con valori di backup per evitare crash
+        titolo = request.form.get('titolo', 'Senza Titolo')
+        descrizione = request.form.get('descrizione', 'Nessuna descrizione')
+        categoria = request.form.get('categoria', 'Altro')
+        classe = request.form.get('classe', '-')
+        aula = request.form.get('aula', '-')
+        user_id = session.get('user_id')
+
+        try:
+            conn = get_db_connection()
+            conn.execute("""
+                INSERT INTO segnalazioni (titolo, descrizione, categoria, classe, aula, id_utente, stato) 
+                VALUES (?, ?, ?, ?, ?, ?, 'rosso')
+            """, (titolo, descrizione, categoria, classe, aula, user_id))
+            conn.commit()
+            conn.close()
+            return redirect(url_for('segnalazioni'))
+        except Exception as e:
+            return f"Errore durante l'invio: {str(e)}"
+            
+    return render_template('nuova_segnalazione.html')
+
+# ===============================
+# AZIONI ADMIN (STATO ED ELIMINAZIONE)
+# ===============================
+@app.route('/aggiorna_stato/<int:id_segnalazione>', methods=['POST'])
+@admin_required
+def aggiorna_stato(id_segnalazione):
+    nuovo_stato = request.form.get('stato')
+    if nuovo_stato in ['rosso', 'giallo', 'verde']:
+        conn = get_db_connection()
+        conn.execute("UPDATE segnalazioni SET stato=? WHERE id_segnalazione=?", (nuovo_stato, id_segnalazione))
+        conn.commit()
+        conn.close()
+    return redirect(url_for('segnalazioni'))
+
+@app.route('/elimina_segnalazione/<int:id_segnalazione>', methods=['POST'])
+@admin_required
+def elimina_segnalazione(id_segnalazione):
+    conn = get_db_connection()
+    conn.execute("DELETE FROM segnalazioni WHERE id_segnalazione=?", (id_segnalazione,))
+    conn.commit()
+    conn.close()
+    return redirect(url_for('segnalazioni'))
+
+# ===============================
+# ALTRE UTILITIES
 # ===============================
 @app.route('/recupera', methods=['GET', 'POST'])
 def recupera():
@@ -126,118 +214,10 @@ def recupera():
             conn.execute("UPDATE utenti SET password=? WHERE email=?", (nuova_pw, email))
             conn.commit()
             conn.close()
-            return f"""
-                <div style="font-family:sans-serif; margin:50px; border:2px solid #28a745; padding:20px; border-radius:10px;">
-                    <h2 style="color:#28a745;">Password Resettata!</h2>
-                    <p>La nuova password temporanea per <b>{email}</b> è: <span style="background:#eee; padding:5px; font-weight:bold;">{nuova_pw}</span></p>
-                    <p>Accedi e cambiala subito dal tuo profilo. <a href='/login'>Accedi qui</a>.</p>
-                </div>
-            """
+            return f"Password resettata a: <b>{nuova_pw}</b>. <a href='/login'>Accedi</a>"
         conn.close()
-        return "<h3>Email non trovata.</h3><br><a href='/recupera'>Riprova</a>"
-    return '<h3>Recupero Password</h3><form method="POST"><input type="email" name="email" placeholder="Tua Email" required><button type="submit">Resetta</button></form><br><a href="/login">Indietro</a>'
-
-# ===============================
-# PROFILO (CAMBIO PASSWORD)
-# ===============================
-@app.route('/profilo', methods=['GET', 'POST'])
-@login_required
-def profilo():
-    messaggio = ""
-    if request.method == 'POST':
-        nuova_pw = request.form.get('nuova_password')
-        if nuova_pw:
-            conn = get_db_connection()
-            conn.execute("UPDATE utenti SET password=? WHERE id_utente=?", (nuova_pw, session['user_id']))
-            conn.commit()
-            conn.close()
-            messaggio = "<p style='color:green;'><b>✅ Password aggiornata con successo!</b></p>"
-        else:
-            messaggio = "<p style='color:red;'>La password non può essere vuota.</p>"
-
-    return f"""
-        <div style="font-family:sans-serif; margin:50px; max-width:400px; padding:20px; border:1px solid #ccc; border-radius:10px; background:white;">
-            <h2>Il Tuo Profilo</h2>
-            <p><b>Nome:</b> {session.get('nome')}</p>
-            <p><b>Ruolo:</b> {session.get('ruolo')}</p>
-            <hr>
-            <h3>Cambia Password</h3>
-            {messaggio}
-            <form method="post">
-                <input type="password" name="nuova_password" placeholder="Inserisci nuova password" required 
-                       style="width:100%; padding:10px; margin-bottom:10px; border:1px solid #ddd; border-radius:5px;">
-                <button type="submit" style="width:100%; padding:10px; background:#2563eb; color:white; border:none; border-radius:5px; cursor:pointer;">
-                    Salva Nuova Password
-                </button>
-            </form>
-            <br>
-            <a href="/" style="text-decoration:none; color:#666;">← Torna alla Home</a>
-        </div>
-    """
-
-# ===============================
-# SEGNALAZIONI
-# ===============================
-@app.route('/')
-@login_required
-def index():
-    return render_template('index.html')
-
-@app.route('/segnalazioni')
-@login_required
-def segnalazioni():
-    conn = get_db_connection()
-    ruolo_corrente = str(session.get('ruolo', '')).lower()
-    if ruolo_corrente == 'admin':
-        res = conn.execute("SELECT s.*, u.nome AS nome_utente FROM segnalazioni s LEFT JOIN utenti u ON s.id_utente = u.id_utente ORDER BY s.data DESC").fetchall()
-    else:
-        res = conn.execute("SELECT s.*, u.nome AS nome_utente FROM segnalazioni s JOIN utenti u ON s.id_utente = u.id_utente WHERE s.id_utente = ? ORDER BY s.data DESC", (session['user_id'],)).fetchall()
-    conn.close()
-    return render_template('segnalazioni.html', segnalazioni=res)
-
-@app.route('/nuova_segnalazione', methods=['GET','POST'])
-@login_required
-def nuova_segnalazione():
-    if str(session.get('ruolo', '')).lower() == 'admin':
-        return "Gli admin non possono inserire segnalazioni.", 403
-    if request.method == 'POST':
-        titolo = request.form.get('titolo', 'Senza Titolo')
-        descrizione = request.form.get('descrizione', 'Nessuna descrizione')
-        categoria = request.form.get('categoria', 'Altro')
-        classe = request.form.get('classe', '-')
-        aula = request.form.get('aula', '-')
-        try:
-            conn = get_db_connection()
-            conn.execute("INSERT INTO segnalazioni (titolo, descrizione, categoria, classe, aula, id_utente, stato) VALUES (?, ?, ?, ?, ?, ?, 'rosso')",
-                         (titolo, descrizione, categoria, classe, aula, session['user_id']))
-            conn.commit()
-            conn.close()
-            return redirect(url_for('segnalazioni'))
-        except Exception as e:
-            return f"Errore nell'invio: {str(e)}"
-    return render_template('nuova_segnalazione.html')
-
-# ===============================
-# AZIONI ADMIN
-# ===============================
-@app.route('/aggiorna_stato/<int:id_segnalazione>', methods=['POST'])
-@admin_required
-def aggiorna_stato(id_segnalazione):
-    nuovo_stato = request.form.get('stato')
-    conn = get_db_connection()
-    conn.execute("UPDATE segnalazioni SET stato=? WHERE id_segnalazione=?", (nuovo_stato, id_segnalazione))
-    conn.commit()
-    conn.close()
-    return redirect(url_for('segnalazioni'))
-
-@app.route('/elimina_segnalazione/<int:id_segnalazione>', methods=['POST'])
-@admin_required
-def elimina_segnalazione(id_segnalazione):
-    conn = get_db_connection()
-    conn.execute("DELETE FROM segnalazioni WHERE id_segnalazione=?", (id_segnalazione,))
-    conn.commit()
-    conn.close()
-    return redirect(url_for('segnalazioni'))
+        return "Email non trovata. <a href='/recupera'>Riprova</a>"
+    return '<h3>Recupero Password</h3><form method="POST"><input type="email" name="email" required><button type="submit">Resetta</button></form>'
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
