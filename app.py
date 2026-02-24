@@ -75,7 +75,6 @@ def admin_required(f):
 # ===============================
 @app.route('/login', methods=['GET','POST'])
 def login():
-    errore = None
     if request.method == 'POST':
         email = request.form.get('email')
         password = request.form.get('password')
@@ -87,8 +86,9 @@ def login():
             session['ruolo'] = user['ruolo']
             session['nome'] = user['nome']
             return redirect(url_for('index'))
-        errore = "Credenziali errate"
-    return render_template('login.html', errore=errore)
+        # Messaggio di errore inline se le credenziali sono sbagliate
+        return "<h3>Credenziali errate.</h3><br><a href='/login'>Riprova</a>"
+    return render_template('login.html')
 
 @app.route('/logout')
 def logout():
@@ -97,7 +97,6 @@ def logout():
 
 @app.route('/register', methods=['GET','POST'])
 def register():
-    errore = None
     if request.method == 'POST':
         nome = request.form.get('nome')
         email = request.form.get('email')
@@ -109,10 +108,49 @@ def register():
             conn.commit()
             return redirect(url_for('login'))
         except sqlite3.IntegrityError:
-            errore = "Email già registrata"
+            return "<h3>Email già registrata.</h3><br><a href='/register'>Riprova</a>"
         finally:
             conn.close()
-    return render_template('register.html', errore=errore)
+    return render_template('register.html')
+
+# ===============================
+# RECUPERO PASSWORD (INLINE)
+# ===============================
+@app.route('/recupera', methods=['GET', 'POST'])
+def recupera():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        nuova_pw = "Scuola2026!"
+        
+        conn = get_db_connection()
+        user = conn.execute("SELECT * FROM utenti WHERE email=?", (email,)).fetchone()
+        
+        if user:
+            conn.execute("UPDATE utenti SET password=? WHERE email=?", (nuova_pw, email))
+            conn.commit()
+            conn.close()
+            return f"""
+                <div style="font-family:sans-serif; margin:50px; border:2px solid #28a745; padding:20px; border-radius:10px;">
+                    <h2 style="color:#28a745;">Password Resettata!</h2>
+                    <p>La nuova password per l'account <b>{email}</b> è: <span style="background:#eee; padding:5px; font-weight:bold;">{nuova_pw}</span></p>
+                    <p>Puoi usarla subito per <a href='/login'>accedere al sito</a>.</p>
+                </div>
+            """
+        conn.close()
+        return "<h3>Email non trovata.</h3><br><a href='/recupera'>Riprova</a>"
+    
+    # Form grafico creato direttamente in Python
+    return '''
+        <div style="font-family:sans-serif; margin:50px; max-width:400px; padding:20px; border:1px solid #ccc; border-radius:10px;">
+            <h2>Recupero Password</h2>
+            <p>Inserisci la tua email per resettare la password.</p>
+            <form method="post">
+                <input type="email" name="email" placeholder="La tua email" required style="width:100%; padding:10px; margin-bottom:10px;">
+                <button type="submit" style="width:100%; padding:10px; background:#1e293b; color:white; border:none; border-radius:5px; cursor:pointer;">Resetta Password</button>
+            </form>
+            <br><a href="/login">Torna al Login</a>
+        </div>
+    '''
 
 # ===============================
 # ROTTE SEGNALAZIONI
@@ -174,17 +212,17 @@ def elimina_segnalazione(id_segnalazione):
     conn.close()
     return redirect(url_for('segnalazioni'))
 
-# ===============================
-# ROTTE "SALVA-SITO" (Evitano i BuildError)
-# ===============================
-@app.route('/recupera')
-def recupera():
-    return "Funzione di recupero password in fase di manutenzione. Contatta l'amministratore."
-
 @app.route('/profilo')
 @login_required
 def profilo():
-    return f"Profilo di {session.get('nome')} - Funzione in arrivo."
+    return f"""
+        <div style="font-family:sans-serif; margin:50px;">
+            <h2>Profilo Utente</h2>
+            <p><b>Nome:</b> {session.get('nome')}</p>
+            <p><b>Ruolo:</b> {session.get('ruolo')}</p>
+            <br><a href='/'>Torna alla Home</a>
+        </div>
+    """
 
 # ===============================
 # AVVIO PER RENDER
