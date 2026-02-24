@@ -5,6 +5,7 @@ import random, string
 import os  # Fondamentale per Render
 
 app = Flask(__name__)
+# Usa una chiave sicura dalle impostazioni di Render o una di default
 app.secret_key = os.environ.get('SECRET_KEY', 'una_chiave_segretissima_di_default')
 DB_NAME = 'scuola.db'
 
@@ -12,7 +13,6 @@ DB_NAME = 'scuola.db'
 # DATABASE
 # ===============================
 def get_db_connection():
-    # Su Render, il percorso deve essere affidabile
     conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     return conn
@@ -48,7 +48,7 @@ def init_db():
     )
     """)
 
-    # Inserimento admin fisso
+    # Inserimento admin fisso se non esiste
     c.execute("SELECT * FROM utenti WHERE ruolo='admin'")
     if not c.fetchone():
         c.execute("""
@@ -82,7 +82,7 @@ def admin_required(f):
     return decorated
 
 # ===============================
-# GENERA PASSWORD PROVVISORIA
+# FUNZIONI UTILI
 # ===============================
 def genera_password():
     caratteri = string.ascii_letters + string.digits + "!@#$%^&*"
@@ -93,7 +93,7 @@ def genera_password():
             return pw
 
 # ===============================
-# ROTTE (LOGIN, LOGOUT, REGISTER)
+# ROTTE DI AUTENTICAZIONE
 # ===============================
 @app.route('/login', methods=['GET','POST'])
 def login():
@@ -144,27 +144,82 @@ def register():
         return redirect(url_for('login'))
     return render_template('register.html', errore=errore)
 
+# ===============================
+# ROTTE PRINCIPALI
+# ===============================
 @app.route('/')
 @login_required
 def index():
     return render_template('index.html')
 
-# ... (tutte le altre tue rotte rimangono uguali) ...
+@app.route('/nuova_segnalazione', methods=['GET','POST'])
+@login_required
+def nuova_segnalazione():
+    if session.get('ruolo') == 'admin':
+        return "Gli admin non possono inserire segnalazioni", 403
+    if request.method == 'POST':
+        titolo = request.form.get('titolo')
+        descrizione = request.form.get('descrizione')
+        categoria = request.form.get('categoria')
+        classe = request.form.get('classe')
+        aula = request.form.get('aula')
+        conn = get_db_connection()
+        conn.execute("""
+            INSERT INTO segnalazioni (titolo,descrizione,categoria,classe,aula,id_utente)
+            VALUES (?,?,?,?,?,?)
+        """,(titolo,descrizione,categoria,classe,aula,session['user_id']))
+        conn.commit()
+        conn.close()
+        return redirect(url_for('segnalazioni'))
+    return render_template('nuova_segnalazione.html')
+
 @app.route('/segnalazioni')
 @login_required
 def segnalazioni():
     conn = get_db_connection()
     if session.get('ruolo') == 'admin':
-        segnalazioni = conn.execute("SELECT s.*, u.nome AS nome_utente FROM segnalazioni s LEFT JOIN utenti u ON s.id_utente=u.id_utente ORDER BY s.data DESC").fetchall()
+        segnalazioni = conn.execute("""
+            SELECT s.*, u.nome AS nome_utente 
+            FROM segnalazioni s 
+            LEFT JOIN utenti u ON s.id_utente=u.id_utente 
+            ORDER BY s.data DESC
+        """).fetchall()
     else:
-        segnalazioni = conn.execute("SELECT s.*, u.nome AS nome_utente FROM segnalazioni s JOIN utenti u ON s.id_utente=u.id_utente WHERE s.id_utente=? ORDER BY s.data DESC",(session['user_id'],)).fetchall()
+        segnalazioni = conn.execute("""
+            SELECT s.*, u.nome AS nome_utente 
+            FROM segnalazioni s 
+            JOIN utenti u ON s.id_utente=u.id_utente 
+            WHERE s.id_utente=? 
+            ORDER BY s.data DESC
+        """,(session['user_id'],)).fetchall()
     conn.close()
     return render_template('segnalazioni.html', segnalazioni=segnalazioni)
 
 # ===============================
-# AVVIO (CORRETTO PER RENDER)
+# AZIONI ADMIN
+# ===============================
+@app.route('/aggiorna_stato/<int:id_segnalazione>', methods=['POST'])
+@admin_required
+def aggiorna_stato(id_segnalazione):
+    stato = request.form.get('stato')
+    conn = get_db_connection()
+    conn.execute("UPDATE segnalazioni SET stato=? WHERE id_segnalazione=?",(stato,id_segnalazione))
+    conn.commit()
+    conn.close()
+    return redirect(url_for('segnalazioni'))
+
+@app.route('/elimina_segnalazione/<int:id_segnalazione>', methods=['POST'])
+@admin_required
+def elimina_segnalazione(id_segnalazione):
+    conn = get_db_connection()
+    conn.execute("DELETE FROM segnalazioni WHERE id_segnalazione=?",(id_segnalazione,))
+    conn.commit()
+    conn.close()
+    return redirect(url_for('segnalazioni'))
+
+# ===============================
+# AVVIO PER RENDER
 # ===============================
 if __name__ == '__main__':
-    # Render imposta automaticamente una variabile d'ambiente chiamata PORT
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
