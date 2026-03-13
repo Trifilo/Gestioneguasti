@@ -3,6 +3,8 @@ import sqlite3
 from functools import wraps
 import os
 import re
+import string
+import random
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', 'chiave_segreta_scuola_2026')
@@ -22,6 +24,15 @@ def valida_password(password):
         return False
     return True
 
+def genera_password_casuale(lunghezza=10):
+    """Genera una password casuale che rispetta i requisiti di validazione."""
+    caratteri = string.ascii_letters + string.digits + "!@#$%&"
+    while True:
+        pwd = ''.join(random.choice(caratteri) for i in range(lunghezza))
+        # Assicuriamoci che la password temporanea superi il nostro stesso controllo
+        if valida_password(pwd):
+            return pwd
+
 def init_db():
     conn = get_db_connection()
     c = conn.cursor()
@@ -33,7 +44,7 @@ def init_db():
         password TEXT, 
         ruolo TEXT DEFAULT 'studente')""")
     
-    # Tabella Segnalazioni (con i campi esatti del tuo HTML)
+    # Tabella Segnalazioni
     c.execute("""CREATE TABLE IF NOT EXISTS segnalazioni (
         id_segnalazione INTEGER PRIMARY KEY AUTOINCREMENT, 
         titolo TEXT, 
@@ -67,7 +78,7 @@ def login_required(f):
     return decorated
 
 # ===============================
-# GESTIONE ACCESSI (LOGICA CSS)
+# GESTIONE ACCESSI
 # ===============================
 @app.route('/login', methods=['GET','POST'])
 def login():
@@ -80,7 +91,6 @@ def login():
         if user:
             session.update({'user_id': user['id_utente'], 'ruolo': user['ruolo'], 'nome': user['nome']})
             return redirect(url_for('index'))
-        # Se sbaglia, ricarica il box login con il CSS dell'errore
         return render_template('login.html', errore="Credenziali non valide. Riprova.")
     return render_template('login.html')
 
@@ -109,13 +119,35 @@ def recupera():
         conn = get_db_connection()
         user = conn.execute("SELECT * FROM utenti WHERE email=?", (email,)).fetchone()
         if user:
-            conn.execute("UPDATE utenti SET password='Reset2026!' WHERE email=?", (email,))
+            # Genera password casuale
+            nuova_password = genera_password_casuale()
+            conn.execute("UPDATE utenti SET password=? WHERE email=?", (nuova_password, email))
             conn.commit()
             conn.close()
-            return render_template('recupera.html', msg="Password resettata! La tua nuova password è: Reset2026!")
+            # Mostra la password casuale all'utente
+            messaggio = f"Password resettata! La tua nuova password temporanea è: {nuova_password}"
+            return render_template('recupera.html', msg=messaggio)
         conn.close()
         return render_template('recupera.html', errore="Email non trovata.")
     return render_template('recupera.html')
+
+@app.route('/cambia_password', methods=['GET', 'POST'])
+@login_required
+def cambia_password():
+    if request.method == 'POST':
+        nuova_password = request.form.get('nuova_password')
+        
+        if not valida_password(nuova_password):
+            return render_template('cambia_password.html', errore="La password deve avere almeno 8 caratteri, una maiuscola e un numero.")
+        
+        conn = get_db_connection()
+        # Aggiorniamo la password dell'utente loggato
+        conn.execute("UPDATE utenti SET password=? WHERE id_utente=?", (nuova_password, session['user_id']))
+        conn.commit()
+        conn.close()
+        return render_template('cambia_password.html', msg="Password personale aggiornata con successo! Ora puoi usare questa per i futuri accessi.")
+        
+    return render_template('cambia_password.html')
 
 @app.route('/logout')
 def logout():
@@ -138,14 +170,11 @@ def segnalazioni():
 @app.route('/polling')
 @login_required
 def polling():
-    """Questa rotta invia i dati alla tabella senza ricaricare la pagina"""
     conn = get_db_connection()
     if session.get('ruolo') == 'admin':
-        # Admin vede i guasti di tutti con il nome utente
         query = "SELECT s.*, u.nome as nome_utente FROM segnalazioni s JOIN utenti u ON s.id_utente = u.id_utente ORDER BY s.data DESC"
         res = conn.execute(query).fetchall()
     else:
-        # Lo studente vede solo le sue segnalazioni
         query = "SELECT s.*, u.nome as nome_utente FROM segnalazioni s JOIN utenti u ON s.id_utente = u.id_utente WHERE s.id_utente=? ORDER BY s.data DESC"
         res = conn.execute(query, (session['user_id'],)).fetchall()
     conn.close()
