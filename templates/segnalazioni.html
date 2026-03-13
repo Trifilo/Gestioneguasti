@@ -29,22 +29,22 @@ function caricaSegnalazioni() {
         data.forEach(function(seg){
             let row = `<tr>
                 <td>${seg.data}</td>
-                <td>${seg.titolo}<br><small>${seg.descrizione}</small></td>
+                <td><strong>${seg.titolo}</strong><br><small>${seg.descrizione}</small></td>
                 <td>${seg.categoria}</td>
                 <td>${seg.classe || ''} / ${seg.aula || ''}</td>
                 <td><span class="status-dot status-${seg.stato}"></span>${seg.stato}</td>
                 <td>${seg.nome_utente}</td>`;
             if ("{{ session.get('ruolo') }}" === "admin") {
                 row += `<td>
-                    <form action="/aggiorna_stato/${seg.id_segnalazione}" method="POST">
+                    <form action="/aggiorna_stato/${seg.id_segnalazione}" method="POST" style="display:inline-block; margin-bottom: 5px;">
                         <select name="stato" onchange="this.form.submit()">
                             <option value="rosso" ${seg.stato=='rosso'?'selected':''}>Rosso</option>
                             <option value="giallo" ${seg.stato=='giallo'?'selected':''}>Giallo</option>
                             <option value="verde" ${seg.stato=='verde'?'selected':''}>Verde</option>
                         </select>
                     </form>
-                    <form action="/elimina_segnalazione/${seg.id_segnalazione}" method="POST" onsubmit="return confirm('Confermi eliminazione?')">
-                        <button class="btn danger" type="submit">Elimina</button>
+                    <form action="/elimina_segnalazione/${seg.id_segnalazione}" method="POST" style="display:inline-block;" onsubmit="return confirm('Confermi eliminazione?')">
+                        <button class="btn danger" type="submit" style="padding: 5px 10px;">Elimina</button>
                     </form>
                 </td>`;
             }
@@ -58,7 +58,5 @@ $(document).ready(function(){
     caricaSegnalazioni();
     setInterval(caricaSegnalazioni, 5000);
 });
-</script>
-{% endblock %}
 </script>
 {% endblock %}
