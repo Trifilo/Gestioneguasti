@@ -1,32 +1,30 @@
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from functools import wraps
+import sqlite3
 import os
 import re
 import string
 import random
+from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 
 app = Flask(__name__)
-# Prende la chiave da Render, altrimenti usa quella di default
 app.secret_key = os.environ.get('SECRET_KEY', 'chiave_segreta_scuola_2026')
 
-# ===============================
-# CONFIGURAZIONE DATABASE
-# ===============================
+# Percorso assoluto per il database SQLite
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, 'scuola.db')
+
 def get_db_connection():
-    # DATABASE_URL è la variabile che Render ti fornirà automaticamente
-    db_url = os.environ.get('DATABASE_URL')
-    conn = psycopg2.connect(db_url, cursor_factory=RealDictCursor)
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row  # Questo permette di accedere alle colonne per nome
     return conn
 
 def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
-    # Tabella Utenti (Usa SERIAL per PostgreSQL invece di AUTOINCREMENT)
+    # Tabella Utenti
     cur.execute("""CREATE TABLE IF NOT EXISTS utenti (
-        id_utente SERIAL PRIMARY KEY, 
+        id_utente INTEGER PRIMARY KEY AUTOINCREMENT, 
         nome TEXT, 
         email TEXT UNIQUE, 
         password TEXT, 
@@ -34,7 +32,7 @@ def init_db():
     
     # Tabella Segnalazioni
     cur.execute("""CREATE TABLE IF NOT EXISTS segnalazioni (
-        id_segnalazione SERIAL PRIMARY KEY, 
+        id_segnalazione INTEGER PRIMARY KEY AUTOINCREMENT, 
         titolo TEXT, 
         descrizione TEXT, 
         categoria TEXT, 
@@ -42,29 +40,23 @@ def init_db():
         aula TEXT, 
         stato TEXT DEFAULT 'rosso', 
         data TIMESTAMP DEFAULT CURRENT_TIMESTAMP, 
-        id_utente INTEGER REFERENCES utenti(id_utente))""")
+        id_utente INTEGER,
+        FOREIGN KEY (id_utente) REFERENCES utenti(id_utente))""")
     
-    # Creazione Admin predefinito se non esiste (Password: Admin123!)
+    # Admin predefinito
     cur.execute("SELECT * FROM utenti WHERE email='admin@scuola.it'")
     if not cur.fetchone():
         hashed_pw = generate_password_hash('Admin123!')
-        cur.execute("INSERT INTO utenti (nome,email,password,ruolo) VALUES (%s,%s,%s,%s)", 
-                 ('Admin','admin@scuola.it', hashed_pw, 'admin'))
+        cur.execute("INSERT INTO utenti (nome,email,password,ruolo) VALUES (?,?,?,?)", 
+                   ('Admin','admin@scuola.it', hashed_pw, 'admin'))
     
     conn.commit()
-    cur.close()
     conn.close()
 
-# Inizializzazione automatica al primo avvio
-with app.app_context():
-    try:
-        init_db()
-    except Exception as e:
-        print(f"Errore inizializzazione DB: {e}")
+# Inizializza il DB all'avvio
+init_db()
 
-# ===============================
-# UTILITY E SICUREZZA
-# ===============================
+# --- DECORATORI ---
 def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
@@ -72,28 +64,14 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated
 
-def valida_password(password):
-    if len(password) < 8 or not re.search("[A-Z]", password) or not re.search("[0-9]", password):
-        return False
-    return True
-
-def genera_password_casuale(lunghezza=10):
-    caratteri = string.ascii_letters + string.digits + "!@#$%&"
-    return ''.join(random.choice(caratteri) for i in range(lunghezza))
-
-# ===============================
-# GESTIONE ACCESSI
-# ===============================
+# --- ROTTE AUTH ---
 @app.route('/login', methods=['GET','POST'])
 def login():
     if request.method == 'POST':
         email = request.form.get('email')
         password = request.form.get('password')
         conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM utenti WHERE email=%s", (email,))
-        user = cur.fetchone()
-        cur.close()
+        user = conn.execute("SELECT * FROM utenti WHERE email=?", (email,)).fetchone()
         conn.close()
         
         if user and check_password_hash(user['password'], password):
@@ -105,21 +83,23 @@ def login():
 @app.route('/register', methods=['GET','POST'])
 def register():
     if request.method == 'POST':
-        nome, email, password = request.form.get('nome'), request.form.get('email'), request.form.get('password')
-        if not valida_password(password):
-            return render_template('register.html', errore="Password non valida (min 8 car, 1 Maiusc, 1 Num).")
+        nome = request.form.get('nome')
+        email = request.form.get('email')
+        password = request.form.get('password')
+        
+        if len(password) < 8:
+            return render_template('register.html', errore="Password troppo corta.")
         
         hashed_pw = generate_password_hash(password)
         conn = get_db_connection()
-        cur = conn.cursor()
         try:
-            cur.execute("INSERT INTO utenti (nome,email,password,ruolo) VALUES (%s,%s,%s,%s)", (nome,email,hashed_pw,'studente'))
+            conn.execute("INSERT INTO utenti (nome,email,password,ruolo) VALUES (?,?,?,?)", 
+                        (nome, email, hashed_pw, 'studente'))
             conn.commit()
             return redirect(url_for('login'))
         except:
-            return render_template('register.html', errore="Email già registrata.")
+            return render_template('register.html', errore="Email già esistente.")
         finally:
-            cur.close()
             conn.close()
     return render_template('register.html')
 
@@ -128,9 +108,41 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
-# ===============================
-# SEGNALAZIONI E POLLING
-# ===============================
+@app.route('/recupera', methods=['GET','POST'])
+def recupera():
+    if request.method == 'POST':
+        email = request.form.get('email')
+        nuova_pass = ''.join(random.choices(string.ascii_letters + string.digits, k=10))
+        hashed_pw = generate_password_hash(nuova_pass)
+        
+        conn = get_db_connection()
+        user = conn.execute("SELECT * FROM utenti WHERE email=?", (email,)).fetchone()
+        if user:
+            conn.execute("UPDATE utenti SET password=? WHERE email=?", (hashed_pw, email))
+            conn.commit()
+            conn.close()
+            return render_template('recupera.html', msg=f"Nuova password temporanea: {nuova_pass}")
+        conn.close()
+        return render_template('recupera.html', errore="Email non trovata.")
+    return render_template('recupera.html')
+
+@app.route('/cambia_password', methods=['GET','POST'])
+@login_required
+def cambia_password():
+    if request.method == 'POST':
+        nuova_pw = request.form.get('nuova_password')
+        if len(nuova_pw) < 8 or not re.search("[A-Z]", nuova_pw):
+            return render_template('cambia_password.html', errore="Password non valida.")
+        
+        hashed_pw = generate_password_hash(nuova_pw)
+        conn = get_db_connection()
+        conn.execute("UPDATE utenti SET password=? WHERE id_utente=?", (hashed_pw, session['user_id']))
+        conn.commit()
+        conn.close()
+        return render_template('cambia_password.html', msg="Password aggiornata con successo!")
+    return render_template('cambia_password.html')
+
+# --- ROTTE CORE ---
 @app.route('/')
 @login_required
 def index(): 
@@ -145,35 +157,25 @@ def segnalazioni():
 @login_required
 def polling():
     conn = get_db_connection()
-    cur = conn.cursor()
     if session.get('ruolo') == 'admin':
         query = "SELECT s.*, u.nome as nome_utente FROM segnalazioni s JOIN utenti u ON s.id_utente = u.id_utente ORDER BY s.data DESC"
-        cur.execute(query)
+        res = conn.execute(query).fetchall()
     else:
-        query = "SELECT s.*, u.nome as nome_utente FROM segnalazioni s JOIN utenti u ON s.id_utente = u.id_utente WHERE s.id_utente=%s ORDER BY s.data DESC"
-        cur.execute(query, (session['user_id'],))
-    res = cur.fetchall()
-    cur.close()
+        query = "SELECT s.*, u.nome as nome_utente FROM segnalazioni s JOIN utenti u ON s.id_utente = u.id_utente WHERE s.id_utente=? ORDER BY s.data DESC"
+        res = conn.execute(query, (session['user_id'],)).fetchall()
     conn.close()
-    return jsonify(res)
+    return jsonify([dict(ix) for ix in res])
 
 @app.route('/nuova_segnalazione', methods=['GET','POST'])
 @login_required
 def nuova_segnalazione():
     if request.method == 'POST':
-        dati = (
-            request.form.get('titolo'),
-            request.form.get('descrizione'),
-            request.form.get('categoria'),
-            request.form.get('classe'),
-            request.form.get('aula'),
-            session['user_id']
-        )
+        dati = (request.form.get('titolo'), request.form.get('descrizione'), 
+                request.form.get('categoria'), request.form.get('classe'), 
+                request.form.get('aula'), session['user_id'])
         conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute("INSERT INTO segnalazioni (titolo,descrizione,categoria,classe,aula,id_utente) VALUES (%s,%s,%s,%s,%s,%s)", dati)
+        conn.execute("INSERT INTO segnalazioni (titolo,descrizione,categoria,classe,aula,id_utente) VALUES (?,?,?,?,?,?)", dati)
         conn.commit()
-        cur.close()
         conn.close()
         return redirect(url_for('segnalazioni'))
     return render_template('nuova_segnalazione.html')
@@ -181,27 +183,26 @@ def nuova_segnalazione():
 @app.route('/aggiorna_stato/<int:id>', methods=['POST'])
 @login_required
 def aggiorna_stato(id):
-    if session.get('ruolo') != 'admin': return "Negato", 403
+    if session.get('ruolo') != 'admin': return "Accesso negato", 403
     nuovo_stato = request.form.get('stato')
     conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("UPDATE segnalazioni SET stato=%s WHERE id_segnalazione=%s", (nuovo_stato, id))
+    conn.execute("UPDATE segnalazioni SET stato=? WHERE id_segnalazione=?", (nuovo_stato, id))
     conn.commit()
-    cur.close()
     conn.close()
     return redirect(url_for('segnalazioni'))
 
 @app.route('/elimina_segnalazione/<int:id>', methods=['POST'])
 @login_required
 def elimina_segnalazione(id):
-    if session.get('ruolo') != 'admin': return "Negato", 403
+    if session.get('ruolo') != 'admin': return "Accesso negato", 403
     conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute("DELETE FROM segnalazioni WHERE id_segnalazione=%s", (id,))
+    conn.execute("DELETE FROM segnalazioni WHERE id_segnalazione=?", (id,))
     conn.commit()
-    cur.close()
     conn.close()
     return redirect(url_for('segnalazioni'))
+
+if __name__ == '__main__':
+    app.run(debug=True)
 
 if __name__ == '__main__':
     app.run()
