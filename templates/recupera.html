@@ -3,12 +3,23 @@
 {% block content %}
 <div class="auth-box">
     <h2>Recupera Password</h2>
-    <form method="POST">
-        <input type="email" name="email" placeholder="Email" required>
-        <button class="btn" type="submit">Recupera</button>
-    </form>
+    
     {% if msg %}
-        <p style="color:green">{{ msg }}</p>
+        <div class="info-box">
+            <strong>{{ msg }}</strong>
+            <p style="margin-top: 10px; font-size: 0.9em;">
+                <em>Copia questa password, <a href="{{ url_for('login') }}">effettua il Login</a> e poi vai su "Cambia Password" nel menu per impostarne una personale.</em>
+            </p>
+        </div>
+    {% else %}
+        <p>Inserisci la tua email per ricevere una password temporanea.</p>
+        <form method="POST">
+            <input type="email" name="email" placeholder="La tua Email" required>
+            <button class="btn" type="submit">Genera Nuova Password</button>
+        </form>
+        {% if errore %}
+            <p style="color:red; margin-top:10px;">{{ errore }}</p>
+        {% endif %}
     {% endif %}
 </div>
 {% endblock %}
